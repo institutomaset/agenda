@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agenda | Instituto Maset</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦷</text></svg>" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; width: 100%; overflow: hidden; }
+    body { background: #0E0E0E; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #1A1A1A; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #C9A84C; }
+    input:focus, select:focus, textarea:focus { border-color: #C9A84C !important; outline: none; }
+    select option { background: #0E0E0E; color: #F0EDE6; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes slideIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .dashboard-root { flex-direction: column !important; }
+      .sidebar { width: 100% !important; min-width: 100% !important; flex-direction: row !important; padding: 12px !important; gap: 12px !important; overflow-x: auto !important; min-height: auto !important; border-right: none !important; border-bottom: 1px solid #2A2A2A !important; }
+      .sidebar-logo { display: none !important; }
+      .sidebar-stats { display: none !important; }
+      .sidebar-bot { display: none !important; }
+      .sidebar-nav { flex-direction: row !important; }
+      .new-btn { margin-top: 0 !important; white-space: nowrap !important; padding: 8px 14px !important; }
+      .week-grid { min-width: 600px !important; }
+      .modal-box { margin: 10px !important; padding: 16px 20px !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    // ════════════════════════════════════════════
+    //  CONFIGURAÇÃO - ALTERE A URL DO SEU SERVIDOR
+    // ════════════════════════════════════════════
+    const API_BASE = "https://unvaporized-soliloquisingly-arlena.ngrok-free.dev";
+
+    // ════════════════════════════════════════════
+    //  UTILITÁRIOS
+    // ════════════════════════════════════════════
+    const fmt = (iso, opts) =>
+      new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", ...opts });
+
+    const fmtDate = (iso) => fmt(iso, { day: "2-digit", month: "2-digit" });
+    const fmtTime = (iso) => fmt(iso, { hour: "2-digit", minute: "2-digit" });
+    const fmtWeekday = (iso) => fmt(iso, { weekday: "short" });
+    const fmtFull = (iso) =>
+      fmt(iso, { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+
+    const getToday = () => {
+      const now = new Date();
+      const brTime = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+      return brTime.toISOString().slice(0, 10);
+    };
+
+    const addDays = (dateStr, n) => {
+      const d = new Date(dateStr + "T12:00:00");
+      d.setDate(d.getDate() + n);
+      return d.toISOString().slice(0, 10);
+    };
+
+    // Pega segunda-feira da semana atual
+    const getMonday = (dateStr) => {
+      const d = new Date(dateStr + "T12:00:00");
+      const day = d.getDay();
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+      d.setDate(diff);
+      return d.toISOString().slice(0, 10);
+    };
+
+    const TODAY = getToday();
+
+    const HOURS = [];
+    for (let h = 7; h <= 20; h++) {
+      HOURS.push(String(h).padStart(2, "0") + ":00");
+      if (h < 20) HOURS.push(String(h).padStart(2, "0") + ":30");
+    }
+
+    const PROCEDIMENTOS = [
+      "Consulta de Avaliação",
+      "Lentes de Contato Dental",
+      "Clareamento a Laser",
+      "Ortodontia",
+      "Implante",
+      "Manutenção",
+      "Outro",
+    ];
+
+    // ════════════════════════════════════════════
+    //  CORES E ESTILOS
+    // ════════════════════════════════════════════
+    const gold = "#C9A84C";
+    const goldDim = "rgba(201,168,76,0.12)";
+    const dark = "#0E0E0E";
+    const darkCard = "#1A1A1A";
+    const darkBorder = "#2A2A2A";
+    const textPrimary = "#F0EDE6";
+    const textSecondary = "#8A8478";
+    const fontDisplay = "'Cormorant Garamond', Georgia, serif";
+    const fontBody = "'Jost', 'Segoe UI', sans-serif";
+
+    // ════════════════════════════════════════════
+    //  ÍCONES SVG
+    // ════════════════════════════════════════════
+    const Icon = ({ path, size = 18, color = "currentColor", style: extraStyle = {} }) => (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
+        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={extraStyle}>
+        <path d={path} />
+      </svg>
+    );
+
+    const ICONS = {
+      calendar: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z",
+      plus: "M12 5v14M5 12h14",
+      chevLeft: "M15 18l-6-6 6-6",
+      chevRight: "M9 6l6 6-6 6",
+      clock: "M12 2a10 10 0 100 20 10 10 0 000-20zM12 6v6l4 2",
+      user: "M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 3a4 4 0 100 8 4 4 0 000-8z",
+      x: "M18 6L6 18M6 6l12 12",
+      trash: "M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2",
+      edit: "M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z",
+      refresh: "M23 4v6h-6M1 20v-6h6M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15",
+      alert: "M12 2L2 22h20L12 2zM12 9v4M12 17h0",
+      sun: "M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42M12 5a7 7 0 100 14 7 7 0 000-14z",
+    };
+
+    // ════════════════════════════════════════════
+    //  APP PRINCIPAL
+    // ════════════════════════════════════════════
+    function App() {
+      const [view, setView] = useState("week");
+      const [selectedDate, setSelectedDate] = useState(getMonday(TODAY));
+      const [events, setEvents] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [modal, setModal] = useState(null);
+      const [botStatus, setBotStatus] = useState(null);
+      const [toast, setToast] = useState(null);
+      const toastRef = useRef(null);
+
+      const showToast = (msg, type = "success") => {
+        setToast({ msg, type });
+        clearTimeout(toastRef.current);
+        toastRef.current = setTimeout(() => setToast(null), 3500);
+      };
+
+      // ── Buscar eventos ──
+      const fetchEvents = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          const start = selectedDate;
+          const end = view === "day" ? addDays(selectedDate, 1) : addDays(selectedDate, 7);
+          const res = await fetch(
+            API_BASE + "/api/dashboard/events?start=" + start + "&end=" + end,
+            { headers: { "ngrok-skip-browser-warning": "true" } }
+          );
+          if (!res.ok) throw new Error("Erro " + res.status);
+          const data = await res.json();
+          setEvents(data.events || []);
+        } catch (e) {
+          setError("Não foi possível carregar a agenda. Verifique se o servidor está online.");
+          console.error("Fetch error:", e);
+        } finally {
+          setLoading(false);
+        }
+      }, [selectedDate, view]);
+
+      const fetchBotStatus = useCallback(async () => {
+        try {
+          const res = await fetch(API_BASE + "/api/dashboard/bot-status", {
+            headers: { "ngrok-skip-browser-warning": "true" },
+          });
+          if (res.ok) setBotStatus(await res.json());
+          else setBotStatus({ status: "offline" });
+        } catch {
+          setBotStatus({ status: "offline" });
+        }
+      }, []);
+
+      useEffect(() => { fetchEvents(); }, [fetchEvents]);
+      useEffect(() => {
+        fetchBotStatus();
+        const i = setInterval(fetchBotStatus, 30000);
+        return () => clearInterval(i);
+      }, [fetchBotStatus]);
+
+      // ── Ações ──
+      const createEvent = async (data) => {
+        try {
+          const res = await fetch(API_BASE + "/api/dashboard/events", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
+            body: JSON.stringify(data),
+          });
+          if (!res.ok) throw new Error();
+          showToast("Consulta agendada com sucesso! ✅");
+          setModal(null);
+          fetchEvents();
+        } catch { showToast("Erro ao agendar consulta", "error"); }
+      };
+
+      const updateEvent = async (eventId, data) => {
+        try {
+          const res = await fetch(API_BASE + "/api/dashboard/events/" + eventId, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
+            body: JSON.stringify(data),
+          });
+          if (!res.ok) throw new Error();
+          showToast("Consulta remarcada! ✅");
+          setModal(null);
+          fetchEvents();
+        } catch { showToast("Erro ao remarcar", "error"); }
+      };
+
+      const cancelEvent = async (eventId) => {
+        try {
+          const res = await fetch(API_BASE + "/api/dashboard/events/" + eventId, {
+            method: "DELETE",
+            headers: { "ngrok-skip-browser-warning": "true" },
+          });
+          if (!res.ok) throw new Error();
+          showToast("Consulta cancelada");
+          setModal(null);
+          fetchEvents();
+        } catch { showToast("Erro ao cancelar", "error"); }
+      };
+
+      // ── Navegação ──
+      const navigate = (dir) => {
+        const n = view === "day" ? 1 : 7;
+        setSelectedDate(addDays(selectedDate, dir * n));
+      };
+
+      const goToday = () => {
+        setSelectedDate(view === "week" ? getMonday(TODAY) : TODAY);
+      };
+
+      const switchView = (v) => {
+        setView(v);
+        if (v === "week") setSelectedDate(getMonday(selectedDate));
+      };
+
+      // ── Dias da semana ──
+      const weekDays = [];
+      for (let i = 0; i < 7; i++) weekDays.push(addDays(selectedDate, i));
+
+      const getEventsForDay = (day) =>
+        events.filter((ev) => ev.start?.dateTime?.slice(0, 10) === day);
+
+      const todayEvents = getEventsForDay(TODAY);
+
+      // ── Header title ──
+      const headerTitle = view === "day"
+        ? fmtFull(selectedDate + "T12:00:00")
+        : fmtDate(weekDays[0] + "T12:00:00") + " — " + fmtDate(weekDays[6] + "T12:00:00");
+
+      return (
+        <div className="dashboard-root" style={S.root}>
+          {/* TOAST */}
+          {toast && (
+            <div style={{
+              ...S.toast,
+              background: toast.type === "error" ? "#5C1E1E" : "#1E3A2A",
+              borderColor: toast.type === "error" ? "#E8614A" : "#5BDA7C",
+            }}>
+              {toast.msg}
+            </div>
+          )}
+
+          {/* SIDEBAR */}
+          <aside className="sidebar" style={S.sidebar}>
+            <div className="sidebar-logo" style={S.logo}>
+              <div style={S.logoMark}>IM</div>
+              <div>
+                <div style={S.logoTitle}>Instituto Maset</div>
+                <div style={S.logoSub}>Painel da Agenda</div>
+              </div>
+            </div>
+
+            <nav className="sidebar-nav" style={S.nav}>
+              <NavBtn icon={ICONS.sun} label="Dia" active={view === "day"} onClick={() => switchView("day")} />
+              <NavBtn icon={ICONS.calendar} label="Semana" active={view === "week"} onClick={() => switchView("week")} />
+            </nav>
+
+            <div className="sidebar-stats" style={S.sideSection}>
+              <div style={S.sideTitle}>Resumo</div>
+              <StatCard num={todayEvents.length} label="consultas hoje" />
+              <StatCard num={events.length} label={"total na " + (view === "day" ? "data" : "semana")} />
+            </div>
+
+            <div className="sidebar-bot" style={S.sideSection}>
+              <div style={S.sideTitle}>Bot Ana</div>
+              <div style={{
+                ...S.badge,
+                background: botStatus?.status === "online" ? "#1E3A2A" : "#3A1E1E",
+                borderColor: botStatus?.status === "online" ? "#2D5A3D" : "#5A2D2D",
+              }}>
+                <div style={{
+                  width: 8, height: 8, borderRadius: "50%",
+                  background: botStatus?.status === "online" ? "#5BDA7C" : "#E8614A",
+                  boxShadow: botStatus?.status === "online" ? "0 0 6px #5BDA7C" : "0 0 6px #E8614A",
+                }} />
+                <span>{botStatus?.status === "online" ? "Online" : botStatus ? "Offline" : "..."}</span>
+              </div>
+              {botStatus?.activeChats > 0 && (
+                <div style={{ fontSize: 11, color: textSecondary, paddingLeft: 4 }}>
+                  {botStatus.activeChats} conversa{botStatus.activeChats > 1 ? "s" : ""} ativa{botStatus.activeChats > 1 ? "s" : ""}
+                </div>
+              )}
+            </div>
+
+            <button className="new-btn" style={S.newBtn}
+              onClick={() => setModal({ type: "create", date: view === "day" ? selectedDate : TODAY })}>
+              <Icon path={ICONS.plus} size={16} color={dark} /> Nova Consulta
+            </button>
+          </aside>
+
+          {/* MAIN */}
+          <main style={S.main}>
+            {/* Header */}
+            <header style={S.header}>
+              <div style={S.headerLeft}>
+                <button style={S.iconBtn} onClick={() => navigate(-1)}><Icon path={ICONS.chevLeft} /></button>
+                <h1 style={S.headerTitle}>{headerTitle}</h1>
+                <button style={S.iconBtn} onClick={() => navigate(1)}><Icon path={ICONS.chevRight} /></button>
+                <button style={S.todayBtn} onClick={goToday}>Hoje</button>
+              </div>
+              <button style={S.iconBtn} onClick={fetchEvents} title="Atualizar agenda">
+                <Icon path={ICONS.refresh} />
+              </button>
+            </header>
+
+            {/* Status bars */}
+            {error && (
+              <div style={S.errorBar}>
+                <Icon path={ICONS.alert} color="#E8614A" size={16} />
+                <span>{error}</span>
+                <button style={S.retryBtn} onClick={fetchEvents}>Tentar novamente</button>
+              </div>
+            )}
+            {loading && <div style={S.loadingBar}><span style={{ animation: "pulse 1.5s infinite" }}>Carregando agenda...</span></div>}
+
+            {/* Grid */}
+            <div style={S.gridWrapper}>
+              {view === "week" ? (
+                <WeekView
+                  days={weekDays}
+                  getEventsForDay={getEventsForDay}
+                  onEventClick={(ev) => setModal({ type: "view", event: ev })}
+                  onSlotClick={(date, time) => setModal({ type: "create", date, time })}
+                  today={TODAY}
+                />
+              ) : (
+                <DayView
+                  date={selectedDate}
+                  events={getEventsForDay(selectedDate)}
+                  onEventClick={(ev) => setModal({ type: "view", event: ev })}
+                  onSlotClick={(time) => setModal({ type: "create", date: selectedDate, time })}
+                />
+              )}
+            </div>
+          </main>
+
+          {/* MODALS */}
+          {modal && (
+            <Overlay onClose={() => setModal(null)}>
+              {modal.type === "create" && (
+                <CreateForm date={modal.date} time={modal.time}
+                  onSubmit={createEvent} onClose={() => setModal(null)} />
+              )}
+              {modal.type === "view" && (
+                <EventDetail event={modal.event}
+                  onEdit={() => setModal({ type: "edit", event: modal.event })}
+                  onCancel={() => cancelEvent(modal.event.id)}
+                  onClose={() => setModal(null)} />
+              )}
+              {modal.type === "edit" && (
+                <EditForm event={modal.event}
+                  onSubmit={(d) => updateEvent(modal.event.id, d)}
+                  onClose={() => setModal(null)} />
+              )}
+            </Overlay>
+          )}
+        </div>
+      );
+    }
+
+    // ════════════════════════════════════════════
+    //  COMPONENTES MENORES
+    // ════════════════════════════════════════════
+
+    function NavBtn({ icon, label, active, onClick }) {
+      return (
+        <button onClick={onClick} style={{
+          ...S.navBtn,
+          ...(active ? { background: goldDim, color: gold } : {}),
+        }}>
+          <Icon path={icon} size={16} /> {label}
+        </button>
+      );
+    }
+
+    function StatCard({ num, label }) {
+      return (
+        <div style={S.statCard}>
+          <span style={S.statNum}>{num}</span>
+          <span style={S.statLabel}>{label}</span>
+        </div>
+      );
+    }
+
+    function Overlay({ children, onClose }) {
+      return (
+        <div style={S.overlay} onClick={onClose}>
+          <div className="modal-box" style={S.modal} onClick={(e) => e.stopPropagation()}>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    // ════════════════════════════════════════════
+    //  WEEK VIEW
+    // ════════════════════════════════════════════
+    function WeekView({ days, getEventsForDay, onEventClick, onSlotClick, today }) {
+      return (
+        <div className="week-grid" style={{ display: "flex", flexDirection: "column", minWidth: 700 }}>
+          {/* Day headers */}
+          <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 3, background: "#111" }}>
+            <div style={S.gutter} />
+            {days.map((day) => (
+              <div key={day} style={{
+                flex: 1, textAlign: "center", padding: "12px 4px",
+                borderBottom: "1px solid " + darkBorder,
+                ...(day === today ? { background: goldDim, borderRadius: "8px 8px 0 0" } : {}),
+              }}>
+                <div style={{ fontSize: 10, textTransform: "uppercase", color: textSecondary, letterSpacing: 1.2 }}>
+                  {fmtWeekday(day + "T12:00:00")}
+                </div>
+                <div style={{
+                  fontSize: 20, fontFamily: fontDisplay, fontWeight: 600,
+                  color: day === today ? gold : textPrimary,
+                }}>
+                  {day.slice(8)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Time rows */}
+          <div style={{ flex: 1, overflow: "auto" }}>
+            {HOURS.map((hour) => (
+              <div key={hour} style={{ display: "flex", minHeight: 52, borderBottom: "1px solid #1A1A1A" }}>
+                <div style={S.gutter}>
+                  <span style={{ fontSize: 10, color: textSecondary }}>{hour}</span>
+                </div>
+                {days.map((day) => {
+                  const evs = getEventsForDay(day).filter((ev) => {
+                    const t = fmtTime(ev.start.dateTime);
+                    return t === hour;
+                  });
+                  return (
+                    <div key={day + hour} style={S.weekCell}
+                      onMouseEnter={(e) => e.currentTarget.style.background = "rgba(201,168,76,0.04)"}
+                      onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                      onClick={() => onSlotClick(day, hour)}>
+                      {evs.map((ev) => (
+                        <div key={ev.id} style={S.weekEvent}
+                          onMouseEnter={(e) => e.currentTarget.style.background = "rgba(201,168,76,0.25)"}
+                          onMouseLeave={(e) => e.currentTarget.style.background = goldDim}
+                          onClick={(e) => { e.stopPropagation(); onEventClick(ev); }}>
+                          <div style={{ fontSize: 10, color: gold, fontWeight: 600 }}>{fmtTime(ev.start.dateTime)}</div>
+                          <div style={{ fontSize: 11, color: textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {(ev.summary || "Consulta").replace(/^✅\s*/, "")}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ════════════════════════════════════════════
+    //  DAY VIEW
+    // ════════════════════════════════════════════
+    function DayView({ date, events, onEventClick, onSlotClick }) {
+      return (
+        <div>
+          {HOURS.map((hour) => {
+            const evs = events.filter((ev) => fmtTime(ev.start.dateTime) === hour);
+            return (
+              <div key={hour} style={{ display: "flex", minHeight: 52, borderBottom: "1px solid #1A1A1A", cursor: "pointer" }}
+                onMouseEnter={(e) => e.currentTarget.style.background = "rgba(201,168,76,0.04)"}
+                onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                onClick={() => onSlotClick(hour)}>
+                <div style={{ ...S.gutter, width: 80 }}>
+                  <span style={{ fontSize: 11, color: textSecondary }}>{hour}</span>
+                </div>
+                <div style={{ flex: 1, padding: "2px 12px" }}>
+                  {evs.map((ev) => (
+                    <div key={ev.id} style={S.dayEvent}
+                      onClick={(e) => { e.stopPropagation(); onEventClick(ev); }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontWeight: 600, fontSize: 14 }}>
+                          {(ev.summary || "Consulta").replace(/^✅\s*/, "")}
+                        </span>
+                        <span style={{ fontSize: 12, color: gold }}>
+                          {fmtTime(ev.start.dateTime)} – {fmtTime(ev.end.dateTime)}
+                        </span>
+                      </div>
+                      {ev.description && (
+                        <div style={{ fontSize: 12, color: textSecondary, marginTop: 4 }}>
+                          {ev.description.slice(0, 100)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // ════════════════════════════════════════════
+    //  FORMULÁRIO: NOVA CONSULTA
+    // ════════════════════════════════════════════
+    function CreateForm({ date, time, onSubmit, onClose }) {
+      const [paciente, setPaciente] = useState("");
+      const [telefone, setTelefone] = useState("");
+      const [procedimento, setProcedimento] = useState(PROCEDIMENTOS[0]);
+      const [dataEvt, setDataEvt] = useState(date || TODAY);
+      const [hora, setHora] = useState(time || "09:00");
+      const [duracao, setDuracao] = useState(60);
+      const [obs, setObs] = useState("");
+      const [saving, setSaving] = useState(false);
+
+      const submit = async () => {
+        if (!paciente.trim()) return;
+        setSaving(true);
+        await onSubmit({
+          summary: procedimento + " — " + paciente,
+          description: "Paciente: " + paciente + "\nTelefone: " + telefone + "\nProcedimento: " + procedimento + (obs ? "\nObs: " + obs : ""),
+          start: dataEvt + "T" + hora + ":00",
+          duration: duracao,
+        });
+        setSaving(false);
+      };
+
+      return (
+        <div>
+          <ModalHeader title="Nova Consulta" onClose={onClose} />
+          <Field label="Paciente *">
+            <input style={S.input} value={paciente} onChange={(e) => setPaciente(e.target.value)}
+              placeholder="Nome completo do paciente" autoFocus />
+          </Field>
+          <Field label="Telefone (WhatsApp)">
+            <input style={S.input} value={telefone} onChange={(e) => setTelefone(e.target.value)}
+              placeholder="(19) 99999-9999" />
+          </Field>
+          <Field label="Procedimento">
+            <select style={S.input} value={procedimento} onChange={(e) => setProcedimento(e.target.value)}>
+              {PROCEDIMENTOS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </Field>
+          <div style={{ display: "flex", gap: 12 }}>
+            <Field label="Data" flex={1}>
+              <input type="date" style={S.input} value={dataEvt} onChange={(e) => setDataEvt(e.target.value)} />
+            </Field>
+            <Field label="Horário" flex={1}>
+              <select style={S.input} value={hora} onChange={(e) => setHora(e.target.value)}>
+                {HOURS.map((h) => <option key={h} value={h}>{h}</option>)}
+              </select>
+            </Field>
+            <Field label="Duração" flex={0} width={110}>
+              <select style={S.input} value={duracao} onChange={(e) => setDuracao(+e.target.value)}>
+                <option value={30}>30 min</option>
+                <option value={60}>1h</option>
+                <option value={90}>1h30</option>
+                <option value={120}>2h</option>
+              </select>
+            </Field>
+          </div>
+          <Field label="Observações">
+            <textarea style={{ ...S.input, minHeight: 56, resize: "vertical" }} value={obs}
+              onChange={(e) => setObs(e.target.value)} placeholder="Anotações opcionais..." />
+          </Field>
+          <div style={S.formActions}>
+            <button style={S.btnSecondary} onClick={onClose}>Cancelar</button>
+            <button style={{ ...S.btnPrimary, opacity: saving ? 0.6 : 1 }} onClick={submit} disabled={saving}>
+              {saving ? "Agendando..." : "Agendar Consulta"}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ════════════════════════════════════════════
+    //  FORMULÁRIO: REMARCAR
+    // ════════════════════════════════════════════
+    function EditForm({ event, onSubmit, onClose }) {
+      const parts = (event.summary || "").replace(/^✅\s*/, "").split(" — ");
+      const [procedimento, setProcedimento] = useState(parts[0] || PROCEDIMENTOS[0]);
+      const [paciente, setPaciente] = useState(parts.slice(1).join(" — ") || "");
+      const [dataEvt, setDataEvt] = useState(event.start?.dateTime?.slice(0, 10) || TODAY);
+      const [hora, setHora] = useState(fmtTime(event.start?.dateTime) || "09:00");
+      const [duracao, setDuracao] = useState(() => {
+        if (event.start?.dateTime && event.end?.dateTime)
+          return Math.round((new Date(event.end.dateTime) - new Date(event.start.dateTime)) / 60000);
+        return 60;
+      });
+      const [obs, setObs] = useState(event.description || "");
+      const [saving, setSaving] = useState(false);
+
+      const submit = async () => {
+        setSaving(true);
+        await onSubmit({
+          summary: procedimento + " — " + paciente,
+          description: obs,
+          start: dataEvt + "T" + hora + ":00",
+          duration: duracao,
+        });
+        setSaving(false);
+      };
+
+      return (
+        <div>
+          <ModalHeader title="Remarcar Consulta" onClose={onClose} />
+          <Field label="Paciente"><input style={S.input} value={paciente} onChange={(e) => setPaciente(e.target.value)} /></Field>
+          <Field label="Procedimento">
+            <select style={S.input} value={procedimento} onChange={(e) => setProcedimento(e.target.value)}>
+              {PROCEDIMENTOS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </Field>
+          <div style={{ display: "flex", gap: 12 }}>
+            <Field label="Nova Data" flex={1}>
+              <input type="date" style={S.input} value={dataEvt} onChange={(e) => setDataEvt(e.target.value)} />
+            </Field>
+            <Field label="Novo Horário" flex={1}>
+              <select style={S.input} value={hora} onChange={(e) => setHora(e.target.value)}>
+                {HOURS.map((h) => <option key={h} value={h}>{h}</option>)}
+              </select>
+            </Field>
+            <Field label="Duração" flex={0} width={110}>
+              <select style={S.input} value={duracao} onChange={(e) => setDuracao(+e.target.value)}>
+                <option value={30}>30 min</option><option value={60}>1h</option>
+                <option value={90}>1h30</option><option value={120}>2h</option>
+              </select>
+            </Field>
+          </div>
+          <Field label="Observações">
+            <textarea style={{ ...S.input, minHeight: 56, resize: "vertical" }} value={obs} onChange={(e) => setObs(e.target.value)} />
+          </Field>
+          <div style={S.formActions}>
+            <button style={S.btnSecondary} onClick={onClose}>Cancelar</button>
+            <button style={{ ...S.btnPrimary, opacity: saving ? 0.6 : 1 }} onClick={submit} disabled={saving}>
+              {saving ? "Salvando..." : "Salvar Alterações"}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ════════════════════════════════════════════
+    //  DETALHE DO EVENTO
+    // ════════════════════════════════════════════
+    function EventDetail({ event, onEdit, onCancel, onClose }) {
+      const [confirm, setConfirm] = useState(false);
+      const title = (event.summary || "Consulta").replace(/^✅\s*/, "");
+
+      return (
+        <div>
+          <ModalHeader title={title} onClose={onClose} />
+
+          <div style={S.detailRow}>
+            <Icon path={ICONS.clock} color={gold} size={20} />
+            <div>
+              <div style={S.detailLabel}>Horário</div>
+              <div style={S.detailValue}>
+                {fmtFull(event.start?.dateTime)}
+              </div>
+              <div style={{ ...S.detailValue, color: gold }}>
+                {fmtTime(event.start?.dateTime)} – {fmtTime(event.end?.dateTime)}
+              </div>
+            </div>
+          </div>
+
+          {event.description && (
+            <div style={S.detailRow}>
+              <Icon path={ICONS.user} color={gold} size={20} />
+              <div>
+                <div style={S.detailLabel}>Informações</div>
+                <div style={{ ...S.detailValue, whiteSpace: "pre-wrap" }}>{event.description}</div>
+              </div>
+            </div>
+          )}
+
+          <div style={{ ...S.formActions, marginTop: 24 }}>
+            {!confirm ? (
+              <>
+                <button style={S.btnDanger} onClick={() => setConfirm(true)}>
+                  <Icon path={ICONS.trash} size={14} /> Cancelar
+                </button>
+                <button style={S.btnPrimary} onClick={onEdit}>
+                  <Icon path={ICONS.edit} size={14} color={dark} /> Remarcar
+                </button>
+              </>
+            ) : (
+              <>
+                <span style={{ fontSize: 12, color: "#E8614A", alignSelf: "center" }}>Tem certeza?</span>
+                <button style={S.btnSecondary} onClick={() => setConfirm(false)}>Voltar</button>
+                <button style={S.btnDanger} onClick={onCancel}>Confirmar</button>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ════════════════════════════════════════════
+    //  COMPONENTES AUXILIARES
+    // ════════════════════════════════════════════
+    function ModalHeader({ title, onClose }) {
+      return (
+        <div style={S.modalHeader}>
+          <h2 style={S.modalTitle}>{title}</h2>
+          <button style={S.modalClose} onClick={onClose}><Icon path={ICONS.x} /></button>
+        </div>
+      );
+    }
+
+    function Field({ label, children, flex, width }) {
+      return (
+        <div style={{ marginBottom: 14, ...(flex !== undefined ? { flex } : {}), ...(width ? { width, minWidth: width } : {}) }}>
+          <label style={S.label}>{label}</label>
+          {children}
+        </div>
+      );
+    }
+
+    // ════════════════════════════════════════════
+    //  ESTILOS
+    // ════════════════════════════════════════════
+    const S = {
+      root: {
+        display: "flex", height: "100vh", background: dark,
+        color: textPrimary, fontFamily: fontBody, fontSize: 14,
+      },
+      sidebar: {
+        width: 260, minWidth: 260, background: "#111",
+        borderRight: "1px solid " + darkBorder,
+        display: "flex", flexDirection: "column", padding: "20px 16px", gap: 20,
+        overflowY: "auto",
+      },
+      logo: { display: "flex", alignItems: "center", gap: 12, marginBottom: 4 },
+      logoMark: {
+        width: 42, height: 42, borderRadius: 10,
+        background: "linear-gradient(135deg, " + gold + ", #A08935)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontFamily: fontDisplay, fontWeight: 700, fontSize: 17, color: dark,
+      },
+      logoTitle: { fontFamily: fontDisplay, fontSize: 17, fontWeight: 600, color: textPrimary },
+      logoSub: { fontSize: 11, color: textSecondary },
+      nav: { display: "flex", flexDirection: "column", gap: 4 },
+      navBtn: {
+        display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
+        background: "transparent", border: "none", borderRadius: 8,
+        color: textSecondary, fontSize: 13, fontFamily: fontBody, cursor: "pointer",
+      },
+      sideSection: { display: "flex", flexDirection: "column", gap: 8 },
+      sideTitle: { fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, color: textSecondary },
+      statCard: {
+        background: darkCard, borderRadius: 8, padding: "10px 14px",
+        display: "flex", alignItems: "baseline", gap: 8,
+      },
+      statNum: { fontSize: 24, fontWeight: 700, fontFamily: fontDisplay, color: gold },
+      statLabel: { fontSize: 12, color: textSecondary },
+      badge: {
+        display: "flex", alignItems: "center", gap: 8,
+        padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 500,
+        border: "1px solid",
+      },
+      newBtn: {
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        padding: "12px 16px", borderRadius: 8,
+        background: "linear-gradient(135deg, " + gold + ", #A08935)",
+        border: "none", color: dark, fontWeight: 600, fontSize: 13,
+        fontFamily: fontBody, cursor: "pointer", marginTop: "auto",
+      },
+      main: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" },
+      header: {
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        padding: "14px 24px", borderBottom: "1px solid " + darkBorder, background: "#111",
+      },
+      headerLeft: { display: "flex", alignItems: "center", gap: 10 },
+      headerTitle: { fontFamily: fontDisplay, fontSize: 20, fontWeight: 500, margin: 0 },
+      iconBtn: {
+        background: "transparent", border: "1px solid " + darkBorder, borderRadius: 6,
+        color: textSecondary, padding: "6px 8px", cursor: "pointer",
+        display: "flex", alignItems: "center",
+      },
+      todayBtn: {
+        background: goldDim, border: "1px solid " + gold + "33", borderRadius: 6,
+        color: gold, padding: "6px 14px", cursor: "pointer", fontSize: 12,
+        fontWeight: 500, fontFamily: fontBody, marginLeft: 4,
+      },
+      errorBar: {
+        display: "flex", alignItems: "center", gap: 8, padding: "10px 24px",
+        background: "#1E1010", color: "#E8614A", fontSize: 13,
+      },
+      retryBtn: {
+        background: "transparent", border: "1px solid #E8614A", borderRadius: 4,
+        color: "#E8614A", padding: "4px 10px", fontSize: 11, cursor: "pointer",
+        fontFamily: fontBody, marginLeft: "auto",
+      },
+      loadingBar: {
+        padding: "8px 24px", background: goldDim, color: gold,
+        fontSize: 12, textAlign: "center",
+      },
+      gridWrapper: { flex: 1, overflow: "auto" },
+      gutter: { width: 60, minWidth: 60, textAlign: "right", paddingRight: 8, paddingTop: 4 },
+      weekCell: {
+        flex: 1, borderLeft: "1px solid #1A1A1A", padding: "2px 3px",
+        cursor: "pointer", transition: "background .15s",
+      },
+      weekEvent: {
+        background: goldDim, border: "1px solid " + gold + "33",
+        borderRadius: 5, padding: "3px 6px", marginBottom: 2, cursor: "pointer",
+        transition: "background .15s",
+      },
+      dayEvent: {
+        background: goldDim, border: "1px solid " + gold + "33",
+        borderRadius: 6, padding: "10px 14px", marginBottom: 4, cursor: "pointer",
+      },
+      overlay: {
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 100, padding: 20,
+      },
+      modal: {
+        background: darkCard, borderRadius: 12, padding: "24px 28px",
+        width: "100%", maxWidth: 500, maxHeight: "90vh", overflow: "auto",
+        border: "1px solid " + darkBorder,
+        boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+        animation: "slideIn .2s ease",
+      },
+      modalHeader: {
+        display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20,
+      },
+      modalTitle: { fontFamily: fontDisplay, fontSize: 22, fontWeight: 500, margin: 0 },
+      modalClose: {
+        background: "transparent", border: "none", color: textSecondary,
+        cursor: "pointer", padding: 4,
+      },
+      label: {
+        display: "block", fontSize: 11, color: textSecondary, marginBottom: 5,
+        textTransform: "uppercase", letterSpacing: 0.5,
+      },
+      input: {
+        width: "100%", padding: "10px 12px",
+        background: dark, border: "1px solid " + darkBorder,
+        borderRadius: 6, color: textPrimary, fontSize: 13, fontFamily: fontBody,
+        boxSizing: "border-box",
+      },
+      formActions: { display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 },
+      btnPrimary: {
+        padding: "10px 20px", borderRadius: 6, border: "none",
+        background: "linear-gradient(135deg, " + gold + ", #A08935)",
+        color: dark, fontSize: 13, fontWeight: 600, cursor: "pointer",
+        fontFamily: fontBody, display: "flex", alignItems: "center", gap: 6,
+      },
+      btnSecondary: {
+        padding: "10px 18px", borderRadius: 6, border: "1px solid " + darkBorder,
+        background: "transparent", color: textSecondary, fontSize: 13,
+        cursor: "pointer", fontFamily: fontBody,
+      },
+      btnDanger: {
+        padding: "10px 18px", borderRadius: 6, border: "1px solid #5A2D2D",
+        background: "#1E1010", color: "#E8614A", fontSize: 13,
+        cursor: "pointer", fontFamily: fontBody, display: "flex", alignItems: "center", gap: 6,
+      },
+      detailRow: { display: "flex", gap: 12, marginBottom: 16, alignItems: "flex-start" },
+      detailLabel: { fontSize: 10, color: textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
+      detailValue: { fontSize: 14, color: textPrimary, marginTop: 2, lineHeight: 1.5 },
+      toast: {
+        position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
+        padding: "12px 24px", borderRadius: 8, fontSize: 13, fontWeight: 500,
+        zIndex: 200, border: "1px solid", color: textPrimary,
+        boxShadow: "0 8px 30px rgba(0,0,0,0.4)", animation: "fadeIn .2s ease",
+      },
+    };
+
+    // ── RENDER ──
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
